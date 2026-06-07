@@ -1,0 +1,6 @@
+# SongTrivia runtime dependencies (desktop).
+# Install with:  pip install -r requirements.txt
+kivy>=2.3
+spotipy>=2.23
+pillow>=10.0
+requests>=2.31

@@ -1,0 +1,117 @@
+name: Build & release
+
+# Builds the installable bundles on GitHub's runners and attaches them to a
+# GitHub Release. Push a version tag to trigger it, e.g.:
+#
+#     git tag v1.0 && git push origin v1.0
+#
+# You can also run it manually from the Actions tab (workflow_dispatch) to test
+# the builds without publishing a release.
+#
+# iOS is deliberately not built here: an installable .ipa requires Apple code
+# signing (a paid Apple Developer account), which CI can't do without those
+# secrets. iPhone users build from source — see the README.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write  # needed to create/update the Release
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt pyinstaller
+      - name: Build executable
+        run: pyinstaller endevinam.spec
+      - name: Rename artifact
+        run: Rename-Item dist/Endevinam.exe Endevinam-Windows.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/Endevinam-Windows.exe
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt pyinstaller
+      - name: Build executable
+        run: pyinstaller endevinam.spec
+      - name: Zip artifact
+        run: cd dist && zip -r ../Endevinam-macOS.zip Endevinam
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: Endevinam-macOS.zip
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt pyinstaller
+      - name: Build executable
+        run: pyinstaller endevinam.spec
+      - name: Zip artifact
+        run: cd dist && zip -r ../Endevinam-Linux.zip Endevinam
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: Endevinam-Linux.zip
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build APK
+        uses: ArtemSBulgakov/buildozer-action@v1
+        with:
+          command: buildozer android debug
+      - name: Rename artifact
+        run: cp bin/*.apk Endevinam-Android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: Endevinam-Android.apk
+
+  release:
+    needs: [windows, macos, linux, android]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          body: |
+            Automated builds for Windows, macOS, Linux and Android.
+
+            These binaries are **unsigned**, so the OS shows a one-time warning:
+            - **Windows:** SmartScreen → *More info* → *Run anyway*.
+            - **macOS:** right-click the app → *Open* (or
+              `xattr -dr com.apple.quarantine Endevinam`). The macOS build targets
+              Apple Silicon.
+            - **Android:** allow installing from unknown sources.
+
+            **iPhone (iOS)** isn't included — an installable build needs Apple code
+            signing. See the README to build it from source.

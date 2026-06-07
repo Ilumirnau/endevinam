@@ -1,0 +1,27 @@
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+
+# Build output
+build/
+dist/
+bin/
+.buildozer/
+*.apk
+*.aab
+*.exe
+
+# Secrets / per-user state — never commit these
+.spotify_cache
+.cache
+client_id
+.env
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Notes
+notes/
