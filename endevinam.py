@@ -59,7 +59,7 @@ from kivy.core.image import Image as CoreImage
 from kivy.core.window import Window
 from kivy.graphics import Color, Ellipse, Line, Rectangle, RoundedRectangle
 from kivy.graphics.texture import Texture
-from kivy.metrics import dp, sp
+from kivy.metrics import dp, sp, Metrics
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
@@ -2162,10 +2162,72 @@ def get_rgba(hex_str):
 
 
 # --------------------------------------------------------------------------- #
+# Desktop window scaling
+# --------------------------------------------------------------------------- #
+# The UI is designed at a 420x700 "phone" reference. A fixed-pixel window of that
+# size is a postage stamp on a 4K/UHD screen (everything tiny) but fine on a 1080p
+# monitor. To keep the app the same fraction of the screen - and the font-to-window
+# ratio constant - on every resolution, we pick one uniform scale at launch, set
+# Metrics.density to it (so every dp()/sp() built afterwards scales), and size the
+# window to match. See _desktop_ui_scale below.
+def _screen_size_px():
+    """Physical screen size in pixels, or (None, None) if unknown.
+
+    Windows-only via the Win32 API (the platform this matters for); other desktops
+    fall back to OS-DPI-based scaling in _desktop_ui_scale. Kivy already makes the
+    process DPI-aware, so GetSystemMetrics reports true physical pixels.
+    """
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            u32 = ctypes.windll.user32
+            try:
+                u32.SetProcessDPIAware()
+            except Exception:  # noqa: BLE001
+                pass
+            return u32.GetSystemMetrics(0), u32.GetSystemMetrics(1)
+        except Exception:  # noqa: BLE001
+            return None, None
+    return None, None
+
+
+def _desktop_ui_scale():
+    """Uniform scale so the 420x700 design occupies a constant fraction of the
+    screen. Falls back to the OS UI scale (Metrics.density) when the screen size
+    is unknown (macOS / Linux)."""
+    ref_w, ref_h = 420, 700
+    target_fraction = 0.85          # of screen height
+    sw, sh = _screen_size_px()
+    if sh:
+        scale = (target_fraction * sh) / ref_h
+        if ref_w * scale > 0.95 * sw:   # keep the portrait window on-screen
+            scale = (0.95 * sw) / ref_w
+    else:
+        scale = Metrics.density or 1.0
+    return max(1.0, min(scale, 3.0))    # clamp to a sane range
+
+
+# --------------------------------------------------------------------------- #
 # App
 # --------------------------------------------------------------------------- #
 class EndevinamApp(App):
     def build(self):
+        # Scale the whole UI to a constant fraction of the screen before any
+        # widget is built (Metrics.density feeds every dp()/sp() below). Android
+        # keeps its real device density, which already scales correctly per phone.
+        if platform != "android":
+            # On HiDPI displays Kivy renders into a framebuffer that is
+            # Window._density times the requested (system) window size, so the
+            # on-screen pixels = Window.size * Window._density. We want a physical
+            # window of 420x700 * scale, so divide the requested size by that
+            # framebuffer ratio; Metrics.density stays at the full scale so the
+            # 700-unit design maps onto the (scaled) framebuffer height.
+            scale = _desktop_ui_scale()
+            fb_ratio = getattr(Window, "_density", 0) or Metrics.density or 1.0
+            Metrics.density = scale
+            Window.size = (round(420 * scale / fb_ratio),
+                           round(700 * scale / fb_ratio))
+
         self.title = "Endevina'm"
         # Brand window/taskbar icon (Kivy shows its own logo otherwise).
         if os.path.exists(ICON_APP):
@@ -2360,6 +2422,6 @@ class EndevinamApp(App):
 
 
 if __name__ == "__main__":
-    if platform != "android":
-        Window.size = (420, 700)  # phone-like aspect for desktop preview
+    # Desktop window sizing is handled in EndevinamApp.build (it scales the
+    # window and the UI together to a constant fraction of the screen).
     EndevinamApp().run()
