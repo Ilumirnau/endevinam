@@ -87,6 +87,25 @@ Your Client ID and login token are stored **only on your own device**. See
 Pick your playback device once (the **Set device** row) before starting; it's reused for the
 whole session.
 
+### Known Spotify limitation (Feb 2026 API changes)
+
+On 11 February 2026 Spotify restricted its Web API for apps in *Development mode* — which
+is what every freshly created Client ID is. Under these rules, an app can only read the
+**songs** of a playlist that the **logged-in account owns or collaborates on**. Reading
+another user's playlist (even a public one) returns `403 Forbidden`, and the game shows a
+message explaining this. The playlist's *name* still loads, but its tracks don't.
+
+What this means in practice:
+
+- **Playlists you created yourself work fine.**
+- **To use someone else's playlist** (including the [E'm EN](https://open.spotify.com/playlist/2PZANz2xnE8LdekKA3sE9J)
+  demo list), open it in Spotify, make your own copy (**Add to playlist → New playlist**),
+  then paste **your copy's** link into the game.
+
+This is a Spotify account/quota policy, not a bug — lifting it requires Spotify's Extended
+Quota Mode, which is only granted to commercial apps with 25k+ monthly active users. Apps
+created **before** 11 Feb 2026 are unaffected and keep their broad read access.
+
 ## Download & run
 
 Prebuilt binaries are attached to each [Release](https://github.com/Ilumirnau/endevinam/releases),

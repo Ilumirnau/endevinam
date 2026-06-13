@@ -150,7 +150,10 @@ TRANSLATIONS = {
         "3. Authorize in the browser. It will land on a '127.0.0.1' page that "
         "may fail to load - that is fine.\n"
         "4. Copy the FULL address from the browser's address bar, paste it "
-        "below, and tap [b]Finish[/b].",
+        "below, and tap [b]Finish[/b].\n\n"
+        "Note: due to Spotify's 2026 API changes, a newly created Client ID can "
+        "only load playlists your own account owns or collaborates on. To use "
+        "someone else's playlist, copy it into your account first.",
         "redirect_uri_caption": "Redirect URI:",
         "client_id_hint": "Paste your Spotify Client ID here",
         "connect_btn": "Connect to Spotify",
@@ -185,6 +188,11 @@ TRANSLATIONS = {
         # ----- Game flow / status -----
         "loading_playlist": "Loading playlist...",
         "invalid_link": "Invalid playlist link",
+        "playlist_forbidden": "Spotify won't share this playlist's songs.\n\n"
+        "Since Spotify's 2026 changes, a newly created Client ID can only read "
+        "playlists your OWN account owns or collaborates on.\n\n"
+        "To use someone else's playlist, open it in Spotify, make your own copy "
+        "(Add to playlist -> New playlist), then paste YOUR copy's link here.",
         "playlist_name": "Playlist: {name}",
         "details_block": "Oldies: {old}%    1960's: {six}%\n"
         "1970's: {sev}%    1980's: {eig}%\n"
@@ -225,7 +233,11 @@ TRANSLATIONS = {
         "3. Autoritza-ho al navegador. Anirà a una pàgina '127.0.0.1' que "
         "potser no carrega; és normal.\n"
         "4. Copia l'adreça SENCERA de la barra d'adreces del navegador, "
-        "enganxa-la a sota i prem [b]Finalitza[/b].",
+        "enganxa-la a sota i prem [b]Finalitza[/b].\n\n"
+        "Nota: pels canvis de l'API de Spotify del 2026, un Client ID nou només "
+        "pot carregar llistes que el teu compte tingui o on siguis "
+        "col·laborador. Per fer servir la llista d'algú altre, copia-la abans "
+        "al teu compte.",
         "redirect_uri_caption": "Redirect URI:",
         "client_id_hint": "Enganxa aquí el teu Client ID de Spotify",
         "connect_btn": "Connecta amb Spotify",
@@ -261,6 +273,12 @@ TRANSLATIONS = {
         # ----- Flux del joc / estat -----
         "loading_playlist": "Carregant la llista...",
         "invalid_link": "Enllaç de llista no vàlid",
+        "playlist_forbidden": "Spotify no comparteix les cançons d'aquesta llista.\n\n"
+        "Des dels canvis de Spotify del 2026, un Client ID nou només pot llegir "
+        "llistes que el TEU compte tingui o on siguis col·laborador.\n\n"
+        "Per fer servir la llista d'algú altre, obre-la a Spotify, fes-ne una "
+        "còpia teva (Afegeix a una llista -> Nova llista) i enganxa aquí "
+        "l'enllaç de la TEVA còpia.",
         "playlist_name": "Llista: {name}",
         "details_block": "Antigues: {old}%    1960: {six}%\n"
         "1970: {sev}%    1980: {eig}%\n"
@@ -455,6 +473,16 @@ def classify_genres(genres):
 # --------------------------------------------------------------------------- #
 # Pure helpers (platform independent)
 # --------------------------------------------------------------------------- #
+class PlaylistForbidden(Exception):
+    """Spotify returned HTTP 403 for a playlist's items.
+
+    Since the Feb 2026 Web API changes, apps created after 11 Feb 2026 (i.e.
+    every player's freshly-made Client ID) can only read the items of playlists
+    their own account owns or collaborates on. Reading anyone else's playlist
+    returns 403. Older "grandfathered" apps are unaffected.
+    """
+
+
 def get_playlist_id(playlist_url):
     """Extract a Spotify playlist id from a URL or URI, or return None."""
     match = PLAYLIST_RE.search(playlist_url or "")
@@ -1622,6 +1650,8 @@ class GameScreen(Screen):
     def _wrap(self, target, args):
         try:
             target(*args)
+        except PlaylistForbidden:
+            self._set_info(tr("playlist_forbidden"))
         except Exception as exc:  # noqa: BLE001
             self._set_info(tr("generic_error", exc=exc))
         finally:
@@ -1660,12 +1690,31 @@ class GameScreen(Screen):
         )
 
     def _fetch_all_tracks(self, playlist_id):
+        # The Feb 2026 Web API changes removed /playlists/{id}/tracks for newly
+        # created apps; the current endpoint is /playlists/{id}/items. spotipy
+        # still targets the old path, so request /items directly via sp._get
+        # (which reuses spotipy's bearer-token handling and raises
+        # SpotifyException on errors). sp.next() follows the paging "next" URL.
         sp = self.app.sp
-        results = sp.playlist_tracks(playlist_id)
-        tracks = results["items"]
-        while results["next"]:
-            results = sp.next(results)
-            tracks.extend(results["items"])
+        try:
+            results = sp._get(
+                f"playlists/{playlist_id}/items",
+                limit=100, offset=0, additional_types="track",
+            )
+            tracks = list(results["items"])
+            while results.get("next"):
+                results = sp.next(results)
+                tracks.extend(results["items"])
+        except spotipy.exceptions.SpotifyException as exc:
+            if getattr(exc, "http_status", None) == 403:
+                raise PlaylistForbidden() from exc
+            raise
+        # Feb 2026 also renamed each entry's nested object from "track" to
+        # "item". Normalize back to "track" so the rest of the code is unchanged
+        # and the old (grandfathered) response shape keeps working too.
+        for entry in tracks:
+            if "track" not in entry and "item" in entry:
+                entry["track"] = entry["item"]
         return tracks
 
     # ----- add to pool ------------------------------------------------------ #
